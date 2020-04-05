@@ -40,7 +40,7 @@ public class ProducerVerticle extends AbstractVerticle {
 
   private ProducerRecord<String, String> record(int i) {
     Table table = table(i);
-    return new ProducerRecord<>("kafka-questions", table.getId(), JsonObject.mapFrom(table).encode());
+    return new ProducerRecord<>(Globals.topic(), table.getId(), JsonObject.mapFrom(table).encode());
   }
 
   private Table table(int i) {
@@ -50,7 +50,7 @@ public class ProducerVerticle extends AbstractVerticle {
   private void initProducer() {
     Properties config = new Properties();
     config.put("client.id", "127.0.0.1");
-    config.put("bootstrap.servers", "localhost:9091");
+    config.put("bootstrap.servers", "localhost:9093");
     config.put("key.serializer", StringSerializer.class.getCanonicalName());
     config.put("value.serializer", StringSerializer.class.getCanonicalName());
     config.put("acks", "all");
