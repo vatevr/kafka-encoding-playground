@@ -1,0 +1,126 @@
+version: '3.6'
+
+# run a 3-broker/1-zookeeper kafka cluster
+# kafka broker state is persisted to named volumes and broker ids are fixed
+# kafka brokers are reachable via ingress port mappings and in the stack network
+
+# configuration:
+# SWARM_HOST := hostname of the machine running the cluster
+# PORT_RANGE := prefix for the exposed ports (<PORT_RANGE>0xx)
+# MANAGER_DOMAIN := traefik reverse proxy domain for the kafka manager
+
+x-kafka-service: &kafka-srv
+  image: wurstmeister/kafka:latest
+  networks:
+    - net
+  deploy:
+    placement:
+      constraints: [node.role == manager]
+    resources:
+      limits:
+        memory: 2024M
+        cpus: '0.25'
+      reservations:
+        memory: 512M
+
+x-kafka-environment: &kafka-env
+  KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PUBLIC:PLAINTEXT,PUBLIC_SASL:SASL_PLAINTEXT,SWARM:SASL_PLAINTEXT
+  # Inner broker communication is autorized to work with ACLs
+  KAFKA_INTER_BROKER_LISTENER_NAME: SWARM
+  KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+  KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
+  KAFKA_LISTENERS: PUBLIC://:9090,PUBLIC_SASL://:9190,SWARM://:9099
+  KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.auth.SimpleAclAuthorizer
+  # for local development we want to allow everyone
+  KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+  KAFKA_SUPER_USERS: User:admin
+  JMX_PORT: 1099
+  KAFKA_OPTS: '-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf'
+  KAFKA_JMX_OPTS: '-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${SWARM_HOST:-exchange.office} -Dcom.sun.management.jmxremote.rmi.port=1099'
+  KAFKA_LOG_DIRS: '/kafka/kafka-logs'
+  # http://gitlab.office/Exchange/xchg-root/issues/627
+  KAFKA_MESSAGE_MAX_BYTES: 3000000
+  KAFKA_REPLICA_FETCH_MAX_BYTES: 3000000
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.5.5
+    networks:
+      - net
+    ports:
+      - target: 2181
+        published: ${PORT_RANGE:-9}081
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - type: volume
+        source: zookeeper-data
+        target: /bitnami/zookeeper
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: 'yes'
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 256M
+
+  broker1:
+    image: wurstmeister/kafka:latest
+    networks:
+      - net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+        reservations:
+          memory: 256M
+    ports:
+      - target: 9090
+        published: ${PORT_RANGE:-9}091
+        protocol: tcp
+        mode: ingress
+      - target: 9190
+        published: ${PORT_RANGE:-9}191
+        protocol: tcp
+        mode: ingress
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_INTER_BROKER_LISTENER_NAME: SWARM
+      KAFKA_ADVERTISED_LISTENERS: SWARM://broker1:9091
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+#      KAFKA_ADVERTISED_LISTENERS: INSIDE://:9092,OUTSIDE://_{HOSTNAME_COMMAND}:9094
+      KAFKA_LISTENERS: INSIDE://:9092,OUTSIDE://:9094,SWARM://:9091
+      # Inner broker communication is autorized to work with ACLs
+      # for local development we want to allow everyone
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+      KAFKA_SUPER_USERS: User:admin
+      JMX_PORT: 1099
+      KAFKA_OPTS: '-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf'
+      KAFKA_JMX_OPTS: '-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${SWARM_HOST:-exchange.office} -Dcom.sun.management.jmxremote.rmi.port=1099'
+      KAFKA_LOG_DIRS: '/kafka/kafka-logs'
+      KAFKA_MESSAGE_MAX_BYTES: 3000000
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 3000000
+
+networks:
+  net:  # allow access to the kafka network from other stacks/standalone containers
+    driver: overlay
+    attachable: true
+    external: false
+  proxy:
+    name: local-kafka-proxy
+    driver: overlay
+    external: false
+
+volumes:
+  zookeeper-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /kafka-volumes/zookeeper

@@ -2,6 +2,7 @@ package io.github.vatevr.kafka;
 
 import io.github.vatevr.kafka.payloads.Table;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.json.JsonObject;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +24,18 @@ public class ProducerVerticle extends AbstractVerticle {
 
     log.info("producing inputs from {}", this.deploymentID());
 
+    vertx.executeBlocking(this::produce, ar -> {
+      if (ar.failed()) {
+        log.error("failed producing due to", ar.cause());
+      } else {
+        log.info("succesfully produced 10 entries");
+      }
+    });
+  }
+
+  private void produce(Promise<Void> promise) {
     IntStream.of(10).forEach(i -> producer.send(record(i)));
+    promise.complete();
   }
 
   private ProducerRecord<String, String> record(int i) {
@@ -38,7 +50,7 @@ public class ProducerVerticle extends AbstractVerticle {
   private void initProducer() {
     Properties config = new Properties();
     config.put("client.id", "127.0.0.1");
-    config.put("bootstrap.servers", "localhost:9092,localhost:9092");
+    config.put("bootstrap.servers", "localhost:9091");
     config.put("key.serializer", StringSerializer.class.getCanonicalName());
     config.put("value.serializer", StringSerializer.class.getCanonicalName());
     config.put("acks", "all");
